@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemetry Real-Time Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@latest/signalr.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .status-connected {
+            background-color: #4caf50;
+            color: white;
+        }
+
+        .status-disconnected {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .metric-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .metric-info {
+            font-size: 12px;
+            color: #999;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .metrics-list {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .metrics-list h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+
+        .metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .metrics-table thead {
+            background-color: #f5f5f5;
+        }
+
+        .metrics-table th {
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+            color: #333;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .metrics-table td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .metrics-table tbody tr:hover {
+            background-color: #f9f9f9;
+        }
+
+        .timestamp {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .alerts-section {
+            margin-top: 30px;
+        }
+
+        .alert-item {
+            background-color: #fff3cd;
+            border-left: 4px solid #ff6b6b;
+            padding: 16px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .alert-item.critical {
+            background-color: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .alert-title {
+            font-weight: bold;
+            color: #721c24;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .alert-message {
+            color: #721c24;
+            font-size: 13px;
+            margin-bottom: 5px;
+        }
+
+        .alert-time {
+            font-size: 11px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Telemetry Real-Time Monitor</h1>
+            <div class="status">
+                <span class="status-badge status-disconnected" id="statusBadge">Disconnected</span>
+                <span id="clientCount">Connected Clients: 0</span>
+            </div>
+        </div>
+
+        <div class="alerts-section">
+            <div id="alertsContainer" style="display: none;">
+                <h2 style="color: #333; margin-bottom: 15px;">⚠️ Critical Alerts</h2>
+                <div id="alertsList"></div>
+            </div>
+        </div>
+
+        <div class="metrics-list">
+            <h2>Live Telemetry Data</h2>
+            <table class="metrics-table">
+                <thead>
+                    <tr>
+                        <th>Device ID</th>
+                        <th>Metric Name</th>
+                        <th>Value</th>
+                        <th>Timestamp</th>
+                        <th>Ingested At</th>
+                    </tr>
+                </thead>
+                <tbody id="metricsTableBody">
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: #999;">Waiting for data...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("http://localhost:7210/hubs/telemetry")
+            .withAutomaticReconnect()
+            .build();
+
+        const statusBadge = document.getElementById('statusBadge');
+        const clientCount = document.getElementById('clientCount');
+        const metricsTableBody = document.getElementById('metricsTableBody');
+        const alertsList = document.getElementById('alertsList');
+        const alertsContainer = document.getElementById('alertsContainer');
+        let metricsArray = [];
+        let alertsArray = [];
+        const maxRows = 50;
+        const maxAlerts = 20;
+
+        connection.on("ReceiveTelemetryMetric", (metric) => {
+            addMetricToTable(metric);
+        });
+
+        connection.on("ReceiveTelemetryMetrics", (metrics) => {
+            metrics.forEach(metric => addMetricToTable(metric));
+        });
+
+        connection.on("UserConnected", (connectionId, count) => {
+            console.log(`User ${connectionId} connected. Total: ${count}`);
+            clientCount.textContent = `Connected Clients: ${count}`;
+        });
+
+        connection.on("UserDisconnected", (connectionId, count) => {
+            console.log(`User ${connectionId} disconnected. Total: ${count}`);
+            clientCount.textContent = `Connected Clients: ${count}`;
+        });
+
+        connection.on("DeviceStatusChanged", (deviceId, status) => {
+            console.log(`Device ${deviceId} status: ${status}`);
+        });
+
+        connection.on("ReceiveCriticalAlert", (alert) => {
+            addAlert(alert);
+            // Optional: Play a sound or show browser notification
+            console.error(`ALERT: ${alert.message}`);
+        });
+
+        connection.onreconnecting((error) => {
+            statusBadge.textContent = "Reconnecting...";
+            statusBadge.className = "status-badge status-disconnected";
+            console.log(`Reconnecting: ${error}`);
+        });
+
+        connection.onreconnected((connectionId) => {
+            statusBadge.textContent = "Connected";
+            statusBadge.className = "status-badge status-connected";
+            console.log(`Connected with ID: ${connectionId}`);
+        });
+
+        connection.onclose((error) => {
+            statusBadge.textContent = "Disconnected";
+            statusBadge.className = "status-badge status-disconnected";
+            console.log(`Connection closed: ${error}`);
+        });
+
+        async function start() {
+            try {
+                await connection.start();
+                statusBadge.textContent = "Connected";
+                statusBadge.className = "status-badge status-connected";
+                console.log("SignalR Connected");
+            } catch (err) {
+                console.log(err);
+                setTimeout(start, 5000);
+            }
+        }
+
+        function addMetricToTable(metric) {
+            metricsArray.unshift(metric); // Add to beginning
+            if (metricsArray.length > maxRows) {
+                metricsArray.pop(); // Remove oldest
+            }
+
+            renderTable();
+        }
+
+        function renderTable() {
+            if (metricsArray.length === 0) {
+                metricsTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No data yet...</td></tr>';
+                return;
+            }
+
+            metricsTableBody.innerHTML = metricsArray.map(metric => `
+                <tr>
+                    <td>${metric.deviceId}</td>
+                    <td>${metric.metricName}</td>
+                    <td><strong>${metric.value.toFixed(2)}</strong></td>
+                    <td><span class="timestamp">${new Date(metric.timeStamp).toLocaleString()}</span></td>
+                    <td><span class="timestamp">${new Date(metric.ingestAt).toLocaleString()}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function addAlert(alert) {
+            alertsArray.unshift(alert);
+            if (alertsArray.length > maxAlerts) {
+                alertsArray.pop();
+            }
+            renderAlerts();
+        }
+
+        function renderAlerts() {
+            if (alertsArray.length === 0) {
+                alertsContainer.style.display = 'none';
+                return;
+            }
+
+            alertsContainer.style.display = 'block';
+            alertsList.innerHTML = alertsArray.map(alert => `
+                <div class="alert-item critical">
+                    <div class="alert-title">🔴 TEMPERATURE ALERT - Device: ${alert.deviceId}</div>
+                    <div class="alert-message">${alert.message}</div>
+                    <div class="alert-time">${new Date(alert.timestamp).toLocaleString()}</div>
+                </div>
+            `).join('');
+        }
+
+        start();
+    </script>
+</body>
+</html>

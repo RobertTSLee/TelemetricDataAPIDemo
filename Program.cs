@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TelemetricDataAPIDemo.Hubs;
 using TelemetryIngestor.Models;
 using TelemetryIngestor.Repositories;
 using TelemetryIngestor.Services;
@@ -12,6 +13,9 @@ builder.Services.AddControllers();
 // Add Swagger/OpenAPI UI
 builder.Services.AddSwaggerGen();
 
+// Add SignalR services
+builder.Services.AddSignalR();
+
 // Register DbContext with PostgreSQL provider
 builder.Services.AddDbContext<TelemetryDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
@@ -22,6 +26,18 @@ builder.Services.AddSingleton<ITelementryChannel>(new TelementryChannel(capacity
 
 // Register the background service that will process telemetry metrics
 builder.Services.AddHostedService<TelementryIngestorWorker>();
+
+// Add CORS policy for cross-origin requests
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAngularClient", policy =>
+    {
+        policy.WithOrigins("http://localhost:4200", "http://localhost", "https://localhost")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials(); // SignalR requires credentials for cross-origin WebSockets
+    });
+});
 
 var app = builder.Build();
 
@@ -42,6 +58,12 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseAuthorization();
+
+// Apply CORS policy - MUST be before MapHub
+app.UseCors("AllowAngularClient");
+
+// Map Hub Endpoint
+app.MapHub<TelemetryHub>("/hubs/telemetry");
 
 app.MapControllers();
 
