@@ -1,0 +1,6 @@
+@TelemetricDataAPIDemo_HostAddress = http://localhost:5017
+
+GET {{TelemetricDataAPIDemo_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
